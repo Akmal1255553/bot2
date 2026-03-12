@@ -1,0 +1,9 @@
+aiogram>=3.7.0
+SQLAlchemy>=2.0.32
+asyncpg>=0.29.0
+alembic>=1.13.2
+python-dotenv>=1.0.1
+pydantic>=2.8.2
+pydantic-settings>=2.3.4
+aiohttp>=3.10.0
+python-json-logger>=2.0.7

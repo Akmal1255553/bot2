@@ -1,0 +1,19 @@
+[Unit]
+Description=AI Media Telegram Bot
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=root
+# Change User to your specific non-root user if preferred, e.g., ubuntu
+WorkingDirectory=/path/to/project
+ExecStart=/path/to/project/venv/bin/python main.py
+Restart=always
+RestartSec=10
+Environment="PATH=/path/to/project/venv/bin"
+# Systemd captures stdout/stderr, accessible via journalctl
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
