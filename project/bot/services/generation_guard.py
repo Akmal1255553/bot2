@@ -45,7 +45,7 @@ class GenerationGuard:
         async with self._daily_lock:
             await self._sync_day()
             if self._daily_count >= self.settings.daily_global_generation_cap:
-                raise AccessDeniedError("Daily generation cap reached. Please try again tomorrow.")
+                raise AccessDeniedError("error.daily_generation_cap")
             self._daily_count += 1
 
     async def ensure_user_rate_limit(self, user_id: int) -> None:
@@ -54,8 +54,8 @@ class GenerationGuard:
             prev = self._user_last_seen.get(user_id)
             if prev is not None and (now - prev) < self.settings.per_user_rate_limit_seconds:
                 raise AccessDeniedError(
-                    f"Please wait {self.settings.per_user_rate_limit_seconds} seconds "
-                    "before the next generation request."
+                    "error.cooldown_wait",
+                    seconds=self.settings.per_user_rate_limit_seconds,
                 )
             self._user_last_seen[user_id] = now
 
@@ -69,7 +69,7 @@ class GenerationGuard:
                 self._global_request_times.popleft()
             if len(self._global_request_times) >= limit:
                 raise AccessDeniedError(
-                    "Global generation rate limit reached. Please retry in a few seconds."
+                    "error.global_rate_limit",
                 )
             self._global_request_times.append(now)
 

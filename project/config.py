@@ -14,11 +14,12 @@ class Settings(BaseSettings):
     log_backup_count: int = 5
 
     bot_token: str = Field(min_length=10)
-    provider_token: str = Field(min_length=1)
+    provider_token: str = ""
     admin_ids_raw: str = ""
     currency: str = "USD"
-    basic_plan_price_cents: int = 700
-    pro_plan_price_cents: int = 1500
+    usdt_trc20_wallet: str = ""
+    basic_plan_price_usdt: float = 2.99
+    pro_plan_price_usdt: float = 6.99
 
     database_url: str = Field(
         default="postgresql+asyncpg://postgres:postgres@localhost:5432/ai_bot"
@@ -35,12 +36,15 @@ class Settings(BaseSettings):
     banned_words_raw: str = "nsfw,terrorism,gore"
 
     free_images_default: int = 3
-    basic_monthly_images: int = 80
-    pro_monthly_images: int = 250
+    basic_monthly_images: int = 50
+    pro_monthly_images: int = 200
     subscription_days: int = 30
     referral_bonus_images: int = 2
 
     per_user_rate_limit_seconds: int = 10
+    request_window_seconds: int = 60
+    free_request_window_limit: int = 6
+    paid_request_window_limit: int = 25
     global_rate_limit_requests: int = 150
     global_rate_limit_period_seconds: int = 10
     global_generation_concurrency: int = 2
@@ -59,14 +63,6 @@ class Settings(BaseSettings):
             raise ValueError("STABILITY_API_KEY must not be empty")
         return token
 
-    @field_validator("provider_token")
-    @classmethod
-    def validate_provider_token(cls, v: str) -> str:
-        token = v.strip()
-        if not token:
-            raise ValueError("PROVIDER_TOKEN must not be empty")
-        return token
-
     @field_validator("currency")
     @classmethod
     def validate_currency(cls, v: str) -> str:
@@ -77,14 +73,14 @@ class Settings(BaseSettings):
             raise ValueError("CURRENCY must be uppercase")
         return currency
 
-    @field_validator("basic_plan_price_cents", "pro_plan_price_cents")
+    @field_validator("basic_plan_price_usdt", "pro_plan_price_usdt")
     @classmethod
-    def validate_plan_prices(cls, v: int) -> int:
-        if not isinstance(v, int):
-            raise ValueError("Plan price must be an integer amount in cents")
+    def validate_plan_prices(cls, v: float) -> float:
+        if not isinstance(v, (int, float)):
+            raise ValueError("Plan price must be numeric")
         if v <= 0:
             raise ValueError("Plan price must be greater than 0")
-        return v
+        return float(v)
 
     @field_validator("subscription_days")
     @classmethod
@@ -92,6 +88,25 @@ class Settings(BaseSettings):
         if v <= 0:
             raise ValueError("SUBSCRIPTION_DAYS must be greater than 0")
         return v
+
+    @field_validator("request_window_seconds")
+    @classmethod
+    def validate_request_window_seconds(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("REQUEST_WINDOW_SECONDS must be greater than 0")
+        return v
+
+    @field_validator("free_request_window_limit", "paid_request_window_limit")
+    @classmethod
+    def validate_request_window_limits(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("Request window limits must be greater than 0")
+        return v
+
+    @field_validator("usdt_trc20_wallet")
+    @classmethod
+    def strip_wallet(cls, v: str) -> str:
+        return v.strip()
 
     @field_validator("banned_words_raw")
     @classmethod

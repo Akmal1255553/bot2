@@ -9,15 +9,35 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_settings
+from database.models import Language, Plan
 
 from bot.handlers.helpers import build_services
-from bot.keyboards.common import start_menu_keyboard, subscription_offer_keyboard
+from bot.i18n import normalize_language, t
+from bot.keyboards.common import (
+    language_selection_keyboard,
+    start_menu_keyboard,
+    subscription_offer_keyboard,
+)
 from bot.keyboards.generation import style_picker_keyboard
 from bot.states import GenerationStates
 from bot.utils.formatters import format_profile, remaining_images
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+
+def _build_start_text(language: str, plan: str, remaining: int) -> str:
+    return (
+        f"{t(language, 'app.start_title')}\n\n"
+        f"{t(language, 'app.start_intro')}\n\n"
+        f"{t(language, 'app.start_plan', plan=plan)}\n"
+        f"{t(language, 'app.start_remaining', remaining=remaining)}\n\n"
+        f"{t(language, 'app.start_menu_prompt')}"
+    )
+
+
+def _is_supported_language(code: str) -> bool:
+    return code in {member.value for member in Language}
 
 
 @router.message(CommandStart())
@@ -27,7 +47,6 @@ async def cmd_start(message: Message, session: AsyncSession) -> None:
     settings = get_settings()
     services = build_services(session)
 
-    # Check if this is a referral deep link: /start ref_XXXXXXXX
     raw_args = message.text or ""
     referral_code: str | None = None
     if " " in raw_args:
@@ -37,7 +56,6 @@ async def cmd_start(message: Message, session: AsyncSession) -> None:
 
     user = await services.user_service.get_or_create(telegram_id=message.from_user.id)
 
-    # Process referral if user is new (no referred_by yet) and valid code
     if referral_code and user.referred_by is None:
         referrer = await services.user_repo.get_by_referral_code(referral_code)
         if referrer and referrer.telegram_id != user.telegram_id:
@@ -52,18 +70,45 @@ async def cmd_start(message: Message, session: AsyncSession) -> None:
                 },
             )
 
-    remaining = remaining_images(user)
-    text = (
-        "🤖 <b>Welcome to AI Creator Bot!</b>\n\n"
-        "Generate stunning AI images in seconds.\n\n"
-        "<b>📋 Plans:</b>\n"
-        "  🆓 <b>FREE</b> — 3 images, 1024×1024\n"
-        "  ⭐ <b>BASIC</b> — 80/month, $7\n"
-        "  💎 <b>PRO</b> — 250/month, $15\n\n"
-        f"Your plan: <b>{user.plan.value}</b>  •  Remaining: <b>{remaining}</b>\n\n"
-        "Choose an option below ⬇️"
+    if not user.language:
+        guessed_language = normalize_language(message.from_user.language_code)
+        await message.answer(
+            t(guessed_language, "app.language_prompt"),
+            reply_markup=language_selection_keyboard(),
+        )
+        return
+
+    language = normalize_language(user.language or message.from_user.language_code)
+    text = _build_start_text(
+        language=language,
+        plan=t(language, f"app.plan_{user.plan.value.lower()}"),
+        remaining=remaining_images(user),
     )
-    await message.answer(text, reply_markup=start_menu_keyboard())
+    await message.answer(text, reply_markup=start_menu_keyboard(language))
+
+
+@router.callback_query(F.data.startswith("lang:set:"))
+async def callback_set_language(query: CallbackQuery, session: AsyncSession) -> None:
+    if not query.from_user or not query.data or not query.message:
+        return
+    selected_language = query.data.split("lang:set:", maxsplit=1)[1].strip().lower()
+    if not _is_supported_language(selected_language):
+        guessed_language = normalize_language(query.from_user.language_code)
+        await query.answer(t(guessed_language, "error.language_not_supported"), show_alert=True)
+        return
+
+    services = build_services(session)
+    user = await services.user_service.get_or_create(query.from_user.id)
+    await services.user_repo.set_language(user, selected_language)
+    user.language = selected_language
+
+    await query.answer(t(selected_language, "app.language_updated"))
+    text = _build_start_text(
+        language=selected_language,
+        plan=t(selected_language, f"app.plan_{user.plan.value.lower()}"),
+        remaining=remaining_images(user),
+    )
+    await query.message.answer(text, reply_markup=start_menu_keyboard(selected_language))
 
 
 @router.callback_query(F.data == "menu:create_image")
@@ -71,11 +116,21 @@ async def callback_create_image(query: CallbackQuery, state: FSMContext, session
     if not query.from_user or not query.message:
         return
     services = build_services(session)
-    await services.user_service.get_or_create(query.from_user.id)
+    user = await services.user_service.get_or_create(query.from_user.id)
+    if not user.language:
+        guessed_language = normalize_language(query.from_user.language_code)
+        await query.message.answer(
+            t(guessed_language, "app.language_prompt"),
+            reply_markup=language_selection_keyboard(),
+        )
+        await query.answer()
+        return
+
+    language = normalize_language(user.language or query.from_user.language_code)
     await state.set_state(GenerationStates.choosing_style)
     await query.message.answer(
-        "🎨 <b>Choose an art style:</b>",
-        reply_markup=style_picker_keyboard(),
+        t(language, "generation.choose_style"),
+        reply_markup=style_picker_keyboard(language),
     )
     await query.answer()
 
@@ -86,76 +141,49 @@ async def callback_profile(query: CallbackQuery, session: AsyncSession) -> None:
         return
     services = build_services(session)
     user = await services.user_service.get_or_create(query.from_user.id)
-    await query.message.answer(format_profile(user))
+    language = normalize_language(user.language or query.from_user.language_code)
+    await query.message.answer(format_profile(user, language))
     await query.answer()
 
 
-@router.callback_query(F.data == "menu:history")
-async def callback_history(query: CallbackQuery, session: AsyncSession) -> None:
+@router.callback_query(F.data == "menu:buy_plan")
+async def callback_buy_plan(query: CallbackQuery, session: AsyncSession) -> None:
     if not query.from_user or not query.message:
         return
-    from bot.handlers.history import _send_history_page
-    await _send_history_page(query.message, session, offset=0, from_user_id=query.from_user.id)
-    await query.answer()
-
-
-@router.callback_query(F.data == "menu:plans")
-async def callback_plans(query: CallbackQuery) -> None:
-    if not query.message:
-        return
-    await query.message.answer(
-        "💳 <b>Choose a plan:</b>",
-        reply_markup=subscription_offer_keyboard(),
-    )
-    await query.answer()
-
-
-@router.callback_query(F.data == "menu:referral")
-async def callback_referral(query: CallbackQuery, session: AsyncSession) -> None:
-    if not query.from_user or not query.message:
-        return
-    settings = get_settings()
     services = build_services(session)
     user = await services.user_service.get_or_create(query.from_user.id)
-    referral_count = await services.user_repo.count_referrals(user.telegram_id)
-    bot_info = await query.message.bot.get_me()
-    referral_link = f"https://t.me/{bot_info.username}?start=ref_{user.referral_code}"
+    language = normalize_language(user.language or query.from_user.language_code)
     await query.message.answer(
-        "🔗 <b>Referral Program</b>\n\n"
-        f"Share your link and earn <b>{settings.referral_bonus_images}</b> free images "
-        "for every friend who joins!\n\n"
-        f"📎 Your link:\n<code>{referral_link}</code>\n\n"
-        f"👥 Friends referred: <b>{referral_count}</b>\n"
-        f"🎁 Bonus images earned: <b>{user.referral_bonus_earned}</b>"
+        t(language, "payment.choose_plan"),
+        reply_markup=subscription_offer_keyboard(
+            language=language,
+            basic_price=services.payment_service.price_text(Plan.BASIC),
+            pro_price=services.payment_service.price_text(Plan.PRO),
+        ),
     )
     await query.answer()
 
 
-@router.callback_query(F.data == "menu:help")
-async def callback_help(query: CallbackQuery) -> None:
-    if not query.message:
+@router.callback_query(F.data == "menu:language")
+async def callback_menu_language(query: CallbackQuery, session: AsyncSession) -> None:
+    if not query.message or not query.from_user:
         return
+    services = build_services(session)
+    user = await services.user_service.get_or_create(query.from_user.id)
+    language = normalize_language(user.language or query.from_user.language_code)
     await query.message.answer(
-        "❓ <b>Help</b>\n\n"
-        "🖼 <b>Create Image</b> — pick a style, aspect ratio, then enter a prompt\n"
-        "📈 <b>Profile</b> — view your plan, usage, and expiry\n"
-        "📜 <b>History</b> — see your recent generations\n"
-        "💳 <b>Plans</b> — upgrade to BASIC or PRO\n"
-        "🔗 <b>Referral</b> — invite friends, earn free images\n\n"
-        "💡 <i>Rate limits apply globally and per user to keep the service stable.</i>"
+        t(language, "app.language_prompt"),
+        reply_markup=language_selection_keyboard(),
     )
     await query.answer()
 
 
 @router.message(Command("help"))
-async def cmd_help(message: Message) -> None:
-    await message.answer(
-        "❓ <b>Help</b>\n\n"
-        "Use /start to open the main menu, or:\n\n"
-        "/generate_image — create an AI image\n"
-        "/profile — view your plan and usage\n"
-        "/history — recent generations\n"
-        "/buy — upgrade your plan\n"
-        "/referral — invite friends, earn images\n"
-        "/help — show this message"
-    )
+async def cmd_help(message: Message, session: AsyncSession) -> None:
+    if not message.from_user:
+        await message.answer(t("en", "help.text"))
+        return
+    services = build_services(session)
+    user = await services.user_service.get_or_create(message.from_user.id)
+    language = normalize_language(user.language or message.from_user.language_code)
+    await message.answer(t(language, "help.text"))

@@ -14,17 +14,29 @@ class UserRepository:
         self.session = session
         self.settings = get_settings()
 
+    @staticmethod
+    def _as_utc(dt: datetime | None) -> datetime | None:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
     async def get_by_telegram_id(self, telegram_id: int) -> User | None:
         stmt: Select[tuple[User]] = select(User).where(User.telegram_id == telegram_id)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def create(self, telegram_id: int) -> User:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
         user = User(
             telegram_id=telegram_id,
             plan=Plan.FREE,
             free_images_left=self.settings.free_images_default,
             images_used_this_month=0,
+            usage_period_started_at=now,
+            request_window_started_at=now,
+            requests_in_window=0,
         )
         self.session.add(user)
         await self.session.commit()
@@ -52,15 +64,48 @@ class UserRepository:
         user.plan = plan
         user.subscription_expiry = now + timedelta(days=days)
         user.images_used_this_month = 0
+        user.usage_period_started_at = now
         await self.session.commit()
         await self.session.refresh(user)
         return user
 
     async def downgrade_to_free(self, user: User) -> None:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
         user.plan = Plan.FREE
         user.subscription_expiry = None
         user.images_used_this_month = 0
+        user.usage_period_started_at = now
         await self.session.commit()
+
+    async def reset_paid_usage_cycle(self, user: User, now: datetime) -> None:
+        user.images_used_this_month = 0
+        user.usage_period_started_at = now
+        await self.session.commit()
+
+    async def set_language(self, user: User, language: str) -> User:
+        user.language = language
+        await self.session.commit()
+        await self.session.refresh(user)
+        return user
+
+    async def reserve_request_slot(
+        self,
+        user: User,
+        now: datetime,
+        window_seconds: int,
+        limit: int,
+    ) -> bool:
+        window_start = self._as_utc(user.request_window_started_at)
+        if not window_start or (now - window_start).total_seconds() >= window_seconds:
+            user.request_window_started_at = now
+            user.requests_in_window = 0
+
+        if user.requests_in_window >= limit:
+            return False
+
+        user.requests_in_window += 1
+        await self.session.commit()
+        return True
 
     async def stats_total_users(self) -> int:
         stmt = select(func.count(User.id))

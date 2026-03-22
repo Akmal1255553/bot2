@@ -1,14 +1,18 @@
+from __future__ import annotations
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-ART_STYLES = [
-    ("🎨 Realistic", "style:realistic"),
-    ("🌸 Anime", "style:anime"),
-    ("💻 Digital Art", "style:digital_art"),
-    ("🖌️ Oil Painting", "style:oil_painting"),
-    ("🎨 Watercolor", "style:watercolor"),
-    ("🧊 3D Render", "style:3d_render"),
-    ("👾 Pixel Art", "style:pixel_art"),
-    ("✨ No Style", "style:none"),
+from bot.i18n import ratio_label, style_label
+
+STYLE_IDS = [
+    "realistic",
+    "anime",
+    "digital_art",
+    "oil_painting",
+    "watercolor",
+    "3d_render",
+    "pixel_art",
+    "none",
 ]
 
 STYLE_PROMPTS = {
@@ -22,41 +26,30 @@ STYLE_PROMPTS = {
     "none": "",
 }
 
-STYLE_LABELS = {
-    "realistic": "🎨 Realistic",
-    "anime": "🌸 Anime",
-    "digital_art": "💻 Digital Art",
-    "oil_painting": "🖌️ Oil Painting",
-    "watercolor": "🎨 Watercolor",
-    "3d_render": "🧊 3D Render",
-    "pixel_art": "👾 Pixel Art",
-    "none": "✨ No Style",
-}
-
-ASPECT_RATIOS = [
-    ("⬜ 1:1 Square", "ratio:1:1"),
-    ("📱 9:16 Portrait", "ratio:9:16"),
-    ("🖥️ 16:9 Landscape", "ratio:16:9"),
-]
-
-RATIO_LABELS = {
-    "1:1": "⬜ Square",
-    "9:16": "📱 Portrait",
-    "16:9": "🖥️ Landscape",
-}
+ASPECT_RATIO_IDS = ["1:1", "9:16", "16:9"]
 
 
-def style_picker_keyboard() -> InlineKeyboardMarkup:
-    rows = []
-    for i in range(0, len(ART_STYLES), 2):
-        row = [InlineKeyboardButton(text=t, callback_data=d) for t, d in ART_STYLES[i : i + 2]]
+def style_picker_keyboard(language: str) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for index in range(0, len(STYLE_IDS), 2):
+        chunk = STYLE_IDS[index : index + 2]
+        row = [
+            InlineKeyboardButton(
+                text=style_label(language, style_id),
+                callback_data=f"style:{style_id}",
+            )
+            for style_id in chunk
+        ]
         rows.append(row)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def aspect_ratio_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=t, callback_data=d) for t, d in ASPECT_RATIOS]
-        ]
-    )
+def aspect_ratio_keyboard(language: str) -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(
+            text=ratio_label(language, ratio_id),
+            callback_data=f"ratio:{ratio_id}",
+        )
+        for ratio_id in ASPECT_RATIO_IDS
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=[buttons])

@@ -28,6 +28,12 @@ class Plan(StrEnum):
     PRO = "PRO"
 
 
+class Language(StrEnum):
+    EN = "en"
+    RU = "ru"
+    UZ = "uz"
+
+
 def _generate_referral_code() -> str:
     return secrets.token_urlsafe(6)[:8]
 
@@ -37,6 +43,7 @@ class User(Base):
     __table_args__ = (
         CheckConstraint("free_images_left >= 0", name="chk_free_images_nonnegative"),
         CheckConstraint("images_used_this_month >= 0", name="chk_images_used_nonnegative"),
+        CheckConstraint("requests_in_window >= 0", name="chk_requests_window_nonnegative"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -47,8 +54,14 @@ class User(Base):
         nullable=False,
         index=True,
     )
+    language: Mapped[str | None] = mapped_column(String(2), nullable=True, default=None)
     free_images_left: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
     images_used_this_month: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    usage_period_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    request_window_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    requests_in_window: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     subscription_expiry: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

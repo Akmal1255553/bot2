@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-
-from aiogram.types import LabeledPrice
+from decimal import Decimal, InvalidOperation
 
 from config import get_settings
 from database.models import Plan, User
@@ -15,38 +14,20 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
-class InvoiceData:
-    title: str
-    description: str
-    payload: str
-    prices: list[LabeledPrice]
-    currency: str
+class PlanOffer:
     plan: Plan
+    monthly_limit: int
+    amount_usdt: str
 
 
 class PaymentService:
     def __init__(self, subscription_service: SubscriptionService) -> None:
         self.subscription_service = subscription_service
         self.settings = get_settings()
-        self._price_by_plan = {
-            Plan.BASIC: self.settings.basic_plan_price_cents,
-            Plan.PRO: self.settings.pro_plan_price_cents,
+        self._monthly_limit_by_plan = {
+            Plan.BASIC: self.settings.basic_monthly_images,
+            Plan.PRO: self.settings.pro_monthly_images,
         }
-
-    def _validate_runtime_payment_config(self) -> None:
-        token = self.settings.provider_token.strip()
-        if not token:
-            raise AccessDeniedError("Payments are not configured: PROVIDER_TOKEN is empty.")
-        if self.settings.currency != self.settings.currency.upper():
-            raise AccessDeniedError("Payments are misconfigured: CURRENCY must be uppercase.")
-        for name, value in (
-            ("BASIC_PLAN_PRICE_CENTS", self.settings.basic_plan_price_cents),
-            ("PRO_PLAN_PRICE_CENTS", self.settings.pro_plan_price_cents),
-        ):
-            if not isinstance(value, int):
-                raise AccessDeniedError(f"Payments are misconfigured: {name} must be an integer.")
-            if value <= 0:
-                raise AccessDeniedError(f"Payments are misconfigured: {name} must be greater than 0.")
 
     def parse_plan(self, value: str) -> Plan:
         plan = value.upper().strip()
@@ -54,45 +35,38 @@ class PaymentService:
             return Plan.BASIC
         if plan == Plan.PRO.value:
             return Plan.PRO
-        raise AccessDeniedError("Unsupported plan.")
+        raise AccessDeniedError("error.unsupported_plan")
 
-    def expected_price(self, plan: Plan) -> int:
-        price = self._price_by_plan.get(plan)
-        if price is None:
-            raise AccessDeniedError("Unsupported plan.")
-        if not isinstance(price, int):
-            raise AccessDeniedError("Plan price must be integer cents.")
-        return price
+    def _price_value(self, plan: Plan) -> Decimal:
+        try:
+            if plan == Plan.BASIC:
+                return Decimal(str(self.settings.basic_plan_price_usdt))
+            if plan == Plan.PRO:
+                return Decimal(str(self.settings.pro_plan_price_usdt))
+        except InvalidOperation as exc:
+            raise AccessDeniedError("error.unsupported_plan") from exc
+        raise AccessDeniedError("error.unsupported_plan")
 
-    def build_invoice(self, user_id: int, plan: Plan) -> InvoiceData:
-        self._validate_runtime_payment_config()
-        amount = self.expected_price(plan)
-        label = f"{plan.value} monthly"
-        payload = f"plan:{plan.value}:user:{user_id}"
-        return InvoiceData(
-            title=f"AI Image Bot {plan.value}",
-            description="Monthly AI image plan",
-            payload=payload,
-            prices=[LabeledPrice(label=label, amount=amount)],
-            currency=self.settings.currency.upper(),
+    def price_text(self, plan: Plan) -> str:
+        price = self._price_value(plan)
+        return f"{price.quantize(Decimal('0.01'))}"
+
+    def offer(self, plan: Plan) -> PlanOffer:
+        limit = self._monthly_limit_by_plan.get(plan)
+        if limit is None:
+            raise AccessDeniedError("error.unsupported_plan")
+        return PlanOffer(
             plan=plan,
+            monthly_limit=limit,
+            amount_usdt=self.price_text(plan),
         )
 
-    def parse_payload(self, payload: str) -> tuple[Plan, int]:
-        parts = payload.split(":")
-        if len(parts) != 4 or parts[0] != "plan" or parts[2] != "user":
-            raise AccessDeniedError("Invalid payment payload.")
-        plan = self.parse_plan(parts[1])
-        try:
-            user_id = int(parts[3])
-        except ValueError as exc:
-            raise AccessDeniedError("Invalid payment payload.") from exc
-        return plan, user_id
-
     @property
-    def provider_token(self) -> str:
-        self._validate_runtime_payment_config()
-        return self.settings.provider_token.strip()
+    def wallet_address(self) -> str:
+        wallet = self.settings.usdt_trc20_wallet.strip()
+        if not wallet:
+            raise AccessDeniedError("payment.wallet_missing")
+        return wallet
 
     async def apply_successful_payment(self, user: User, plan: Plan) -> User:
         logger.info(

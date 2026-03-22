@@ -12,8 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import Settings
 
 from bot.handlers.helpers import build_services
+from bot.i18n import normalize_language, plan_label, t
 from bot.services.exceptions import AccessDeniedError
-from bot.utils.formatters import format_profile, plan_badge
+from bot.utils.formatters import format_profile
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -28,26 +29,27 @@ async def cmd_admin(
 ) -> None:
     if not message.from_user:
         return
+
+    guessed_language = normalize_language(message.from_user.language_code)
     if message.from_user.id not in settings.admin_ids:
-        await message.answer("⛔ Access denied.")
+        await message.answer(t(guessed_language, "admin.access_denied"))
         return
 
     services = build_services(session)
+    admin_user = await services.user_service.get_or_create(message.from_user.id)
+    language = normalize_language(admin_user.language)
     args = (command.args or "").strip()
 
     if not args:
         stats = await services.admin_service.get_stats()
         await message.answer(
-            "🛡️ <b>Admin Panel</b>\n\n"
-            f"👥 Total users: <b>{stats.total_users}</b>\n"
-            f"💳 Paid users: <b>{stats.paid_users}</b>\n"
-            f"📊 Today's generations: <b>{stats.today_generations}</b>\n\n"
-            "<b>Commands:</b>\n"
-            "<code>/admin stats</code> — dashboard\n"
-            "<code>/admin user &lt;id&gt;</code> — lookup user\n"
-            "<code>/admin grant &lt;id&gt; &lt;N&gt;</code> — give bonus images\n"
-            "<code>/admin plan &lt;id&gt; &lt;BASIC|PRO&gt;</code> — set plan\n"
-            "<code>/admin broadcast &lt;message&gt;</code> — message all users"
+            t(
+                language,
+                "admin.panel",
+                total_users=stats.total_users,
+                paid_users=stats.paid_users,
+                today_generations=stats.today_generations,
+            )
         )
         return
 
@@ -58,87 +60,115 @@ async def cmd_admin(
     if sub_command == "stats":
         stats = await services.admin_service.get_stats()
         await message.answer(
-            "📊 <b>Bot Statistics</b>\n\n"
-            f"👥 Total users: <b>{stats.total_users}</b>\n"
-            f"💳 Paid users: <b>{stats.paid_users}</b>\n"
-            f"📈 Generations today: <b>{stats.today_generations}</b>\n"
+            t(
+                language,
+                "admin.stats",
+                total_users=stats.total_users,
+                paid_users=stats.paid_users,
+                today_generations=stats.today_generations,
+            )
         )
+        return
 
-    elif sub_command == "user":
+    if sub_command == "user":
         if not sub_args.strip():
-            await message.answer("Usage: <code>/admin user &lt;telegram_id&gt;</code>")
+            await message.answer(t(language, "admin.usage_user"))
             return
         try:
             target_id = int(sub_args.strip())
         except ValueError:
-            await message.answer("⚠️ Invalid telegram_id.")
+            await message.answer(t(language, "admin.invalid_telegram_id"))
             return
+
         target_user = await services.user_repo.get_by_telegram_id(target_id)
         if not target_user:
-            await message.answer("❌ User not found.")
+            await message.answer(t(language, "admin.user_not_found"))
             return
-        referral_count = await services.user_repo.count_referrals(target_user.telegram_id)
-        await message.answer(
-            f"👤 <b>User {target_id}</b>\n\n"
-            + format_profile(target_user)
-            + f"\n🔗 Referrals: <b>{referral_count}</b>\n"
-            f"🎁 Referral bonus: <b>{target_user.referral_bonus_earned}</b>"
-        )
 
-    elif sub_command == "grant":
+        referral_count = await services.user_repo.count_referrals(target_user.telegram_id)
+        target_language = normalize_language(target_user.language)
+        await message.answer(
+            t(
+                language,
+                "admin.user_details",
+                user_id=target_id,
+                profile=format_profile(target_user, target_language),
+                referrals=referral_count,
+                bonus=target_user.referral_bonus_earned,
+            )
+        )
+        return
+
+    if sub_command == "grant":
         grant_parts = sub_args.strip().split()
         if len(grant_parts) != 2:
-            await message.answer("Usage: <code>/admin grant &lt;telegram_id&gt; &lt;count&gt;</code>")
+            await message.answer(t(language, "admin.usage_grant"))
             return
         try:
             target_id = int(grant_parts[0])
             count = int(grant_parts[1])
         except ValueError:
-            await message.answer("⚠️ Invalid arguments.")
+            await message.answer(t(language, "admin.invalid_arguments"))
             return
         if count <= 0 or count > 1000:
-            await message.answer("⚠️ Count must be 1–1000.")
+            await message.answer(t(language, "admin.invalid_count"))
             return
+
         target_user = await services.user_repo.get_by_telegram_id(target_id)
         if not target_user:
-            await message.answer("❌ User not found.")
+            await message.answer(t(language, "admin.user_not_found"))
             return
-        await services.user_repo.grant_bonus(target_user, count)
-        await message.answer(f"✅ Granted <b>{count}</b> bonus images to user {target_id}.")
 
-    elif sub_command == "plan":
+        await services.user_repo.grant_bonus(target_user, count)
+        await message.answer(
+            t(language, "admin.granted", count=count, user_id=target_id)
+        )
+        return
+
+    if sub_command == "plan":
         plan_parts = sub_args.strip().split()
         if len(plan_parts) != 2:
-            await message.answer("Usage: <code>/admin plan &lt;telegram_id&gt; &lt;BASIC|PRO&gt;</code>")
+            await message.answer(t(language, "admin.usage_plan"))
             return
         try:
             target_id = int(plan_parts[0])
             plan = services.payment_service.parse_plan(plan_parts[1])
         except ValueError:
-            await message.answer("⚠️ Invalid telegram_id.")
+            await message.answer(t(language, "admin.invalid_telegram_id"))
             return
-        except AccessDeniedError:
-            await message.answer("⚠️ Plan must be BASIC or PRO.")
+        except AccessDeniedError as exc:
+            await message.answer(t(language, exc.code, **exc.context))
             return
+
         target_user = await services.user_repo.get_by_telegram_id(target_id)
         if not target_user:
-            await message.answer("❌ User not found.")
+            await message.answer(t(language, "admin.user_not_found"))
             return
-        await services.subscription_service.activate_plan(target_user, plan)
-        badge = plan_badge(plan)
-        await message.answer(f"{badge} Plan <b>{plan.value}</b> activated for user {target_id}.")
 
-    elif sub_command == "broadcast":
+        await services.subscription_service.activate_plan(target_user, plan)
+        await message.answer(
+            t(
+                language,
+                "admin.plan_activated",
+                plan=plan_label(language, plan.value),
+                user_id=target_id,
+            )
+        )
+        return
+
+    if sub_command == "broadcast":
         if not sub_args.strip():
-            await message.answer("Usage: <code>/admin broadcast &lt;message&gt;</code>")
+            await message.answer(t(language, "admin.usage_broadcast"))
             return
+
         broadcast_text = sub_args.strip()
         user_ids = await services.admin_service.get_all_user_ids()
         sent = 0
         failed = 0
         progress = await message.answer(
-            f"📢 Broadcasting to <b>{len(user_ids)}</b> users..."
+            t(language, "admin.broadcast_start", count=len(user_ids))
         )
+
         for uid in user_ids:
             try:
                 await message.bot.send_message(uid, broadcast_text)
@@ -146,17 +176,14 @@ async def cmd_admin(
             except Exception:
                 failed += 1
             if sent % 25 == 0:
-                await asyncio.sleep(1)  # Telegram rate limit
+                await asyncio.sleep(1)
+
         try:
             await progress.edit_text(
-                f"📢 <b>Broadcast complete</b>\n\n"
-                f"✅ Sent: {sent}\n"
-                f"❌ Failed: {failed}"
+                t(language, "admin.broadcast_done", sent=sent, failed=failed)
             )
         except Exception:
             pass
+        return
 
-    else:
-        await message.answer(
-            "⚠️ Unknown command. Use <code>/admin</code> for available commands."
-        )
+    await message.answer(t(language, "admin.unknown_command"))

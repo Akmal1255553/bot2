@@ -4,8 +4,7 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, ParseMode
 
 from bot.handlers import get_main_router
 from bot.middlewares.db_session import DbSessionMiddleware
@@ -21,14 +20,14 @@ from database.session import close_db, init_db
 async def set_bot_commands(bot: Bot) -> None:
     await bot.set_my_commands(
         [
-            BotCommand(command="start", description="🏠 Main menu"),
-            BotCommand(command="generate_image", description="🖼 Generate AI image"),
-            BotCommand(command="profile", description="📈 View profile and quota"),
-            BotCommand(command="history", description="📜 Generation history"),
-            BotCommand(command="buy", description="💳 Buy BASIC or PRO"),
-            BotCommand(command="referral", description="🔗 Referral program"),
-            BotCommand(command="help", description="❓ Show help"),
-            BotCommand(command="admin", description="🛡️ Admin controls"),
+            BotCommand(command="start", description="Main menu"),
+            BotCommand(command="generate_image", description="Generate AI image"),
+            BotCommand(command="profile", description="View profile and quota"),
+            BotCommand(command="history", description="Generation history"),
+            BotCommand(command="buy", description="Buy BASIC or PRO"),
+            BotCommand(command="referral", description="Referral program"),
+            BotCommand(command="help", description="Show help"),
+            BotCommand(command="admin", description="Admin controls"),
         ]
     )
 
@@ -52,10 +51,8 @@ async def run() -> None:
 
         dp.message.middleware(RequestLoggingMiddleware())
         dp.callback_query.middleware(RequestLoggingMiddleware())
-        dp.pre_checkout_query.middleware(RequestLoggingMiddleware())
         dp.message.middleware(DbSessionMiddleware())
         dp.callback_query.middleware(DbSessionMiddleware())
-        dp.pre_checkout_query.middleware(DbSessionMiddleware())
 
         generation_service = GenerationService(image_provider=get_image_provider())
         generation_guard = GenerationGuard()
