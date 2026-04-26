@@ -47,6 +47,12 @@ Telegram bot for image generation with Stability AI, PostgreSQL, aiogram, crypto
   - Uzbek
 - User language is stored in DB and used for all bot messages
 
+## 24/7 Hosting
+
+To keep the bot running when your PC is off, deploy it to a cloud host. See
+[`HOSTING.md`](./HOSTING.md) for step-by-step instructions on Fly.io, Railway,
+or a VPS. A `fly.toml` and `Procfile` are included for one-command deploys.
+
 ## Commands
 
 - `/start`
