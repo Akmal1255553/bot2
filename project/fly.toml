@@ -1,0 +1,26 @@
+# fly.toml — Fly.io deployment for AI Image Telegram Bot
+# Run from inside ./project:
+#   fly launch --no-deploy --copy-config --name <your-app-name>
+#   fly postgres create --name <your-app-name>-db
+#   fly postgres attach <your-app-name>-db
+#   fly secrets set BOT_TOKEN=... STABILITY_API_KEY=... USDT_TRC20_WALLET=... ADMIN_IDS_RAW=...
+#   fly deploy
+
+app = "ai-image-telegram-bot"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[processes]
+  bot = "python main.py"
+
+# This is a long-polling Telegram bot (no inbound HTTP), so no [http_service]
+# block is needed. The VM stays running because of `auto_stop_machines = false`.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+  processes = ["bot"]
+
+[deploy]
+  strategy = "immediate"

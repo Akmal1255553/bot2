@@ -4,7 +4,8 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.types import BotCommand, ParseMode
+from aiogram.enums import ParseMode
+from aiogram.types import BotCommand
 
 from bot.handlers import get_main_router
 from bot.middlewares.db_session import DbSessionMiddleware
